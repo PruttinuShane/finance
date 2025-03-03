@@ -2,66 +2,41 @@ import pandas as pd
 import statsmodels.api as sm
 
 # Load the data
-data = pd.read_csv('modified_data.csv')
+df = pd.read_csv('modified_data.csv')
 
-# Convert end date to datetime (using the format from your data)
-data['End date'] = pd.to_datetime(data['End date'])
+# Display basic information and first few rows
+print(df.info())
+print(df.head())
 
-# Create time period indicator
-def assign_time_period(date):
-    if date < pd.Timestamp('2020-01-31'):
-        return -1  # pre-covid
-    elif date <= pd.Timestamp('2022-01-06'):
-        return 0   # during-covid
-    else:
-        return 1   # post-covid
+# Convert 'End date' to datetime format
+df["End date"] = pd.to_datetime(df["End date"], errors="coerce")
 
-data['TimePeriod'] = data['End date'].apply(assign_time_period)
+# Define time period categories
+df["Time Period"] = df["End date"].apply(
+    lambda x: -1 if x < pd.Timestamp("2020-01-31") else 
+              0 if x <= pd.Timestamp("2022-01-06") else 1
+)
 
-# Create default indicator based on supplier list charges
-data['Default'] = (data['Charges have been made for remaining on supplier list'] == False).astype(int)
+# Check the distribution of the new variable
+print(df["Time Period"].value_counts())
 
-# Convert percentages to numeric values
-dependent_vars = [
-    '% Invoices paid within 30 days',
-    '% Invoices paid between 31 and 60 days',
-    '% Invoices paid later than 60 days',
-    '% Invoices not paid within agreed terms'
-]
+# Convert 'Charges have been made for remaining on supplier list' to binary Default variable
+df["Default"] = df["Charges have been made for remaining on supplier list"].astype(bool).map({False: 1, True: 0})
 
-# Add a constant for the regression models
-X = sm.add_constant(data['TimePeriod'])
+# Check for missing values
+print("Missing values in Default:", df["Default"].isna().sum())
 
-# First regression: Default vs Time Period
-y_default = data['Default']
-mask_default = ~(X.isna().any(axis=1) | y_default.isna())
-X_clean_default = X[mask_default]
-y_clean_default = y_default[mask_default]
+# Verify the distribution of 'Default' variable
+print(df["Default"].value_counts())
 
-model_default = sm.OLS(y_clean_default, X_clean_default).fit()
-print("Regression results for Default vs Time Period:")
-print(model_default.summary())
-print("\n" + "="*50 + "\n")
+# Define dependent and independent variables
+X = df[["Time Period"]]  # Independent variable
+X = sm.add_constant(X)   # Add intercept
+y = df["Default"]        # Dependent variable
 
-# Run regression for each payment timing variable
-for var in dependent_vars:
-    y = data[var]
-    # Remove any NaN values
-    mask = ~(X.isna().any(axis=1) | y.isna())
-    X_clean = X[mask]
-    y_clean = y[mask]
-    
-    model = sm.OLS(y_clean, X_clean).fit()
-    print(f"Regression results for {var}:")
-    print(model.summary())
-    print("\n" + "="*50 + "\n")
+# Run logistic regression
+logit_model = sm.Logit(y, X)
+result = logit_model.fit()
 
-# Print summary statistics for each time period
-print("Summary Statistics by Time Period:")
-print("\nDefault Rates:")
-print(data.groupby('TimePeriod')['Default'].mean())
-
-print("\nPayment Timing Metrics:")
-for var in dependent_vars:
-    print(f"\n{var}:")
-    print(data.groupby('TimePeriod')[var].mean())
+# Display summary
+print(result.summary())
